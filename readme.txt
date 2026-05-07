@@ -1,4 +1,4 @@
-1. open cmd from the project folder and run python server :
+1. open cmd from the project folder and run python server (or any server) :
 python -m http.server 8000
 
 2. open ngrok.exe :
