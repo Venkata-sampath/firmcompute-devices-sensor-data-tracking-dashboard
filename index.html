@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#346093">
+    <meta name="theme-color" content="#ffffff">
+    <link rel="manifest" href="manifest.json">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <title>FirmCompute Sensor Dashboard</title>
+    <style>
+        body {
+            background-color: #346093;
+            overflow-x: hidden;
+            margin: 0;
+        }
+        .navbar-custom {
+            background-color: white;
+            padding: 8px 12px;
+        }
+        .navbar-transparent {
+            background-color: rgba(255, 255, 255, 0.7) !important;
+            backdrop-filter: blur(6px);
+        }
+        .logo {
+            height: 40px;
+        }
+        .card-custom {
+            background: white;
+            border-radius: 6px;
+            padding: 8px 10px !important;
+        }
+        .glow {
+            animation: pulseGlow 0.25s ease;
+        }
+
+        @keyframes pulseGlow {
+            0% {
+                box-shadow: 0 0 0px #76923b;
+                transform: scale(1);
+            }
+            50% {
+                box-shadow: 
+                    0 0 15px #76923b,
+                    0 0 30px #76923b,
+                    0 0 45px #76923b;
+                transform: scale(1.05);
+            }
+            100% {
+                box-shadow: 0 0 0px #76923b;
+                transform: scale(1);
+            }
+        }
+        .icon-battery {
+            color: #76923b;
+        }
+        .icon-temp {
+            color: #dc3545;
+        }
+        .icon-ext-temp {
+            color: #ffc107;
+        }
+        .icon-humidity {
+            color: #0d6efd;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</head>
+<body>
+    <nav id="navbar" class="navbar navbar-custom sticky-top px-2">
+        <img src="assets/logo.svg" class="logo">
+        <div class="d-flex align-items-center gap-2">
+            <button class="btn btn-success btn-sm" onclick="startScan()">Start</button>
+            <div class="dropdown">
+                <button class="btn btn-light btn-sm" data-bs-toggle="dropdown">
+                    ☰
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end p-2" style="min-width:200px;">
+                    <li class="mb-2">
+                        <input id="searchInput"
+                            type="text"
+                            placeholder="Search..."
+                            class="form-control form-control-sm"
+                            oninput="applyFilters()">
+                    </li>
+                    <li class="mb-2">
+                        <button class="btn btn-danger btn-sm w-100" onclick="stopScan()">
+                            Stop Scan
+                        </button>
+                    </li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li class="mb-1 px-1">
+                        <small>Sort By</small>
+                    </li>
+                    <li>
+                        <select class="form-select form-select-sm" onchange="setSort(this.value)">
+                            <option value="default" selected>Default</option>
+
+                            <option value="time_desc">Time Latest → Old</option>
+                            <option value="time_asc">Time Old → Latest</option>
+
+                            <option value="battery_asc">Battery Low → High</option>
+                            <option value="battery_desc">Battery High → Low</option>
+
+                            <option value="temp_asc">Temp Low → High</option>
+                            <option value="temp_desc">Temp High → Low</option>
+
+                            <option value="humidity_asc">Humidity Low → High</option>
+                            <option value="humidity_desc">Humidity High → Low</option>
+                        </select>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+    <div class="container-fluid px-2" style="overflow-x: hidden;">
+        <div id="devices" class="row mt-1 g-1"></div>
+    </div>
+    <script>
+        let devicesData = {};
+        let currentSort = "default";
+        const devicesMap = new Map();
+        let currentScan = null;
+
+        window.addEventListener("scroll", () => {
+            const nav = document.getElementById("navbar");
+            if (window.scrollY > 20) {
+                nav.classList.add("navbar-transparent");
+            } else {
+                nav.classList.remove("navbar-transparent");
+            }
+        });
+
+        function getBatteryColor(percent) {
+            if (percent <= 20) return "#dc3545";   
+            if (percent <= 50) return "#ffc107";   
+            return "#28a745";                    
+        }
+
+        function getBatteryIcon(percent) {
+            if (percent <= 20) return "bi-battery";
+            if (percent <= 50) return "bi-battery-half";
+            return "bi-battery-full";
+        }
+
+        function getBatteryPercentage(voltage) {
+            const min = 2.0;
+            const max = 3.3;
+
+            let percent = ((voltage - min) / (max - min)) * 100;
+            percent = Math.max(0, Math.min(100, percent));
+
+            return percent.toFixed(0);
+        }
+
+        function getFormattedDateTime() {
+            const now = new Date();
+            const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+            const month = months[now.getMonth()];
+            const day = now.getDate().toString().padStart(2, '0');
+            const year = now.getFullYear().toString().slice(-2);
+
+            let hours = now.getHours();
+            const minutes = now.getMinutes().toString().padStart(2, '0');
+
+            const ampm = hours >= 12 ? "PM" : "AM";
+            hours = hours % 12 || 12;
+
+            return `${month} ${day} ${year} ${hours}:${minutes} ${ampm}`;
+        }
+
+        function createOrUpdateDevice(event) {
+            const name = event.device.name || "";
+            if (!name.startsWith("FC")) return;
+
+            const id = event.device.id;
+
+            let wrapper = devicesMap.get(id);
+
+            if (!wrapper) {
+                wrapper = document.createElement("div");
+                wrapper.className = "col-6 d-flex";
+                wrapper.style.padding = "2px 3px";
+                wrapper.style.boxSizing = "border-box";
+
+                const card = document.createElement("div");
+                card.className = "card-custom w-100 h-100";
+
+                wrapper.appendChild(card);
+
+                devicesMap.set(id, wrapper);
+            }
+
+            const card = wrapper.firstChild;
+            let battery = "-";
+            let temperature = "-";
+            let humidity = "-";
+
+            event.manufacturerData.forEach((valueDataView) => {
+                const bytes = new Uint8Array(valueDataView.buffer);
+                const hexArray = [...bytes].map(b => b.toString(16).padStart(2, '0'));
+                const lastByte = hexArray[hexArray.length - 1];
+
+                if (lastByte === "9a") {
+                    const voltage = parseInt(hexArray[7], 16) * 0.03125;
+                    battery = getBatteryPercentage(voltage);
+                    temperature = (parseInt(hexArray[12] + hexArray[13], 16) * 0.01).toFixed(2);
+                }
+
+                if (lastByte === "9b") {
+                    const voltage = parseInt(hexArray[7], 16) * 0.03125;
+                    battery = getBatteryPercentage(voltage);
+
+                    let extDecimal = parseInt(hexArray[0] + hexArray[1], 16);
+                    if (extDecimal >= 0x8000) extDecimal -= 0x10000;
+                    temperature = (extDecimal * 0.0078125).toFixed(2);
+                }
+
+                if (lastByte === "99") {
+                    const voltage = parseInt(hexArray[7], 16) * 0.03125;
+                    battery = getBatteryPercentage(voltage);
+
+                    const extRaw = parseInt(hexArray[0] + hexArray[1], 16);
+                    temperature = (-45 + (175 * (extRaw / 65535))).toFixed(2);
+
+                    const humRaw = parseInt(hexArray[3] + hexArray[4], 16);
+                    humidity = (-6 + (125 * (humRaw / 65535))).toFixed(2);
+                }
+            });
+
+            const time = getFormattedDateTime();
+            const batteryPercent = parseInt(battery);
+            const batteryColor = getBatteryColor(batteryPercent);
+            const batteryIcon = getBatteryIcon(batteryPercent);
+
+            card.innerHTML = `
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                    <div style="font-size:15px; font-weight:700;">
+                        ${name}
+                    </div>
+
+                    <div style="font-size:14px; font-weight:600; color:${batteryColor};">
+                        <i class="bi ${batteryIcon}"></i> ${battery}%
+                    </div>
+                </div>
+
+                <div style="display:flex; justify-content:space-between; font-size:14px; font-weight:600; margin-bottom:4px;">
+                    <div style="color:#dc3545;">
+                        <i class="bi bi-thermometer-half"></i> ${temperature}°C
+                    </div>
+
+                    <div style="color:#0d6efd;">
+                        <i class="bi bi-droplet-fill"></i> ${humidity}%
+                    </div>
+                </div>
+
+                <div class="text-muted" style="font-size:12px; margin-top:4px;">
+                    ${time}
+                </div>
+            `;
+
+            card.classList.remove("glow");
+            void card.offsetWidth;
+            card.classList.add("glow");
+
+            setTimeout(() => {
+                card.classList.remove("glow");
+            }, 250);
+
+            devicesData[id] = {
+                name,
+                battery: isNaN(parseInt(battery)) ? 0 : parseInt(battery),
+                temperature: isNaN(parseFloat(temperature)) ? 0 : parseFloat(temperature),
+                humidity: isNaN(parseFloat(humidity)) ? 0 : parseFloat(humidity),
+                time: Date.now(),
+                element: wrapper
+            };
+
+            applyFilters();
+        }
+
+        async function startScan() {
+            if (!navigator.bluetooth || !navigator.bluetooth.requestLEScan) {
+                alert("Bluetooth scan not supported");
+                return;
+            }
+
+            document.getElementById("devices").innerHTML = "";
+            devicesMap.clear();
+
+            try {
+                currentScan = await navigator.bluetooth.requestLEScan({acceptAllAdvertisements: true});
+                navigator.bluetooth.addEventListener('advertisementreceived', createOrUpdateDevice);
+            } catch (error) {
+                const container = document.getElementById("devices");
+                if (error.name === "NotFoundError" || error.name === "NotAllowedError") {
+                    container.innerHTML = `
+                        <div class="col-12">
+                            <div class="alert alert-warning text-center m-2">
+                                Please enable Bluetooth and try again.
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    container.innerHTML = `
+                        <div class="col-12">
+                            <div class="alert alert-danger text-center m-2">
+                                Bluetooth not available or not supported.
+                            </div>
+                        </div>
+                    `;
+                }
+                console.error(error);
+            }
+        }
+
+        function stopScan() {
+            if (currentScan) {
+                currentScan.stop();
+                currentScan = null;
+            }
+        }
+
+        function applyFilters() {
+            const search = document.getElementById("searchInput").value.toLowerCase();
+            let list = Object.values(devicesData);
+            list = list.filter(d => d.name.toLowerCase().includes(search));
+            if (currentSort === "time_desc") {
+                list.sort((a, b) => b.time - a.time);
+            }
+            else if (currentSort === "time_asc") {
+                list.sort((a, b) => a.time - b.time);
+            }
+            else if (currentSort === "battery_asc") {
+                list.sort((a, b) => a.battery - b.battery);
+            }
+            else if (currentSort === "battery_desc") {
+                list.sort((a, b) => b.battery - a.battery);
+            }
+            else if (currentSort === "temp_asc") {
+                list.sort((a, b) => a.temperature - b.temperature);
+            }
+            else if (currentSort === "temp_desc") {
+                list.sort((a, b) => b.temperature - a.temperature);
+            }
+            else if (currentSort === "humidity_asc") {
+                list.sort((a, b) => a.humidity - b.humidity);
+            }
+            else if (currentSort === "humidity_desc") {
+                list.sort((a, b) => b.humidity - a.humidity);
+            }
+
+            const container = document.getElementById("devices");
+            container.innerHTML = "";
+
+            list.forEach(d => {
+                container.appendChild(d.element);
+            });
+        }
+
+        function setSort(type) {
+            currentSort = type;
+            applyFilters();
+        }
+
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js').then(() => console.log("SW registered"));
+        }
+    </script>
+</body>
+</html>

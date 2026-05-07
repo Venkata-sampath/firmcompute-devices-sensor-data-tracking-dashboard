@@ -1,0 +1,15 @@
+{
+  "name": "FirmCompute Sensor Dashboard",
+  "short_name": "FirmCompute",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "##ffffff",
+  "theme_color": "#346093",
+  "icons": [
+    {
+      "src": "logo.svg",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ]
+}
